@@ -1,14 +1,13 @@
 import ctypes
 import win32clipboard
 import win32api
-import win32con
 import win32gui
-import win32clipboard
 import time
 import traceback
 from typing import Deque
+from .processor import add_text_to_custom_clipboard
 
-def listen(cq: Deque[str]):
+def listen_to_clipboard(cq: Deque[str]):
     # Define constants
     WM_CLIPBOARDUPDATE = 0x031D
 
@@ -19,9 +18,7 @@ def listen(cq: Deque[str]):
             try:
                 win32clipboard.OpenClipboard()
                 clipboard_data = win32clipboard.GetClipboardData()
-                print("New clipboard content:", clipboard_data)
-                if isinstance(clipboard_data, str):
-                    cq.append(clipboard_data)
+                add_text_to_custom_clipboard(cq, clipboard_data)
                 win32clipboard.CloseClipboard()
             except Exception as e:
                 print("Error reading clipboard:", e)
@@ -45,4 +42,4 @@ def listen(cq: Deque[str]):
     print("Listening for clipboard changes...")
     while True:
         win32gui.PumpMessages()
-        time.sleep(0.1)
+        time.sleep(0.05)

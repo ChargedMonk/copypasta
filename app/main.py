@@ -1,7 +1,8 @@
-import time
 from collections import deque
-from be import listen
+import time
+from be import listen_to_clipboard
 import threading
+from typing import Deque
 
 def logger():
     while True:
@@ -9,9 +10,9 @@ def logger():
         time.sleep(10)
 
 if __name__ == '__main__':
-    global_queue = deque()
+    global_queue: Deque[str] = deque()
 
-    listener_thread = threading.Thread(target=listen, args=(global_queue,), daemon=True)
+    listener_thread = threading.Thread(target=listen_to_clipboard, args=(global_queue,), daemon=True)
     listener_thread.start()
 
     logger_thread = threading.Thread(target=logger)
