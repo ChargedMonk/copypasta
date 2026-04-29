@@ -1,3 +1,7 @@
+target/
+copypasta.db
+copypasta-data/
+
 .idea
 .venv
 **pycache**
