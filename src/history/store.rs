@@ -13,7 +13,7 @@ pub struct Store {
 
 impl Store {
     pub fn open() -> anyhow::Result<Self> {
-        let proj = ProjectDirs::from("com", "VatsalyaBajpai", "Copypasta")
+        let proj = ProjectDirs::from("com", "ChargedMonk", "RipMultiPaste")
             .context("ProjectDirs not available")?;
         let base_dir = proj.data_local_dir().to_path_buf();
         Self::open_at(base_dir, 250 * 1024 * 1024)

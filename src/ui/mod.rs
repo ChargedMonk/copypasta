@@ -32,7 +32,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_SETFONT, WS_VSCROLL,
 };
 
-const PICKER_CLASS: PCWSTR = w!("CopypastaPickerWindow");
+const PICKER_CLASS: PCWSTR = w!("RipMultiPastePickerWindow");
 static PICKER_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
 const PICKER_WIDTH: i32 = 560;
 const PICKER_HEIGHT: i32 = 420;
@@ -102,7 +102,7 @@ pub fn open_picker_from_hotkey(main_hwnd: HWND, hotkey_received_at: Instant) -> 
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             PICKER_CLASS,
-            w!("Copypasta"),
+            w!("Rip Multi Paste"),
             WS_POPUP | WS_BORDER,
             0,
             0,

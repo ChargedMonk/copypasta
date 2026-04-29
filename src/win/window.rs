@@ -11,7 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_OVERLAPPED,
 };
 
-const WINDOW_CLASS: PCWSTR = w!("CopypastaHiddenWindow");
+const WINDOW_CLASS: PCWSTR = w!("RipMultiPasteHiddenWindow");
 
 pub struct HiddenWindow {
     hwnd: HWND,
@@ -40,7 +40,7 @@ impl HiddenWindow {
             let hwnd = CreateWindowExW(
                 Default::default(),
                 WINDOW_CLASS,
-                w!("Copypasta"),
+                w!("Rip Multi Paste"),
                 WS_OVERLAPPED,
                 0,
                 0,

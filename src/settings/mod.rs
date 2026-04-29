@@ -13,7 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 
-const SETTINGS_CLASS: PCWSTR = w!("CopypastaSettingsWindow");
+const SETTINGS_CLASS: PCWSTR = w!("RipMultiPasteSettingsWindow");
 static SETTINGS_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
 
 const CMD_RECORD_OPEN: usize = 1001;
@@ -56,7 +56,7 @@ pub fn open_settings(main_hwnd: HWND) -> anyhow::Result<()> {
         let hwnd = CreateWindowExW(
             Default::default(),
             SETTINGS_CLASS,
-            w!("Copypasta Settings"),
+            w!("Rip Multi Paste Settings"),
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,

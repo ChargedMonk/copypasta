@@ -312,7 +312,7 @@ fn normalize_modifier_name(modifier: &str) -> String {
 }
 
 fn config_path() -> Option<PathBuf> {
-    let dirs = ProjectDirs::from("com", "VatsalyaBajpai", "Copypasta")?;
+    let dirs = ProjectDirs::from("com", "ChargedMonk", "RipMultiPaste")?;
     Some(dirs.config_dir().join("hotkeys.json"))
 }
 

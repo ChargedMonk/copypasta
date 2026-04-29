@@ -34,7 +34,7 @@ pub fn add(hwnd: HWND) -> anyhow::Result<()> {
             ..Default::default()
         };
 
-        let tip = "Copypasta";
+        let tip = "Rip Multi Paste";
         let mut wide: Vec<u16> = tip.encode_utf16().collect();
         wide.push(0);
         for (i, ch) in wide.into_iter().take(nid.szTip.len()).enumerate() {

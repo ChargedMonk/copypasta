@@ -1,14 +1,14 @@
-## Copypasta (Rust)
+## Rip Multi Paste
 
-Fast, local-only clipboard history + multi-paste for Windows.
+Fast, local-only clipboard history, search, and multi-paste for Windows.
 
 ### Current features
 
-- **Very small UI**: `Win + Ctrl + Alt + V` opens a minimal picker (Win32 popup + listbox).
+- **Very small UI**: `Win + Ctrl + Alt + V` opens a minimal searchable picker (Win32 popup + listbox).
 - **Paste + recency**: selecting an item sets it as the Windows clipboard, sends `Ctrl + V` to the previously focused app, and **moves the item to the top**.
 - **Deduplication**: items are deduped by a BLAKE3 fingerprint (text is normalized; non-text uses canonical formats).
 - **Rich clipboard formats (best-effort)**: captures/restores multiple formats when they are backed by global memory (Unicode text, ANSI text, HTML, RTF, DIB/DIBV5 images, file drops).
-- **Local persistence + lazy loading**: metadata in SQLite, payloads stored as per-item files; payloads are loaded from disk only when pasted.
+- **Local persistence + lazy loading**: metadata in SQLite, payloads stored as per-item files; payloads are loaded from disk only when pasted. Rip Multi Paste stores more history than Windows clipboard history's small recent-item limit.
 - **Tray controls**: notification-area icon with **Pause capture**, **Clear history**, **Exit**.
 
 ### Hotkeys
@@ -17,7 +17,7 @@ Fast, local-only clipboard history + multi-paste for Windows.
 - **Win + Ctrl + Alt + C**: copy current selection into Windows clipboard, then capture it via clipboard updates
 - **Win + Ctrl + Alt + Q**: dev-only quit hotkey
 
-Hotkeys are configurable in `hotkeys.json` under the per-user app config directory. Copypasta creates this file on first run:
+Hotkeys are configurable in `hotkeys.json` under the per-user app config directory. Rip Multi Paste creates this file on first run:
 
 ```json
 {
@@ -55,7 +55,7 @@ Release builds hide the console window (see `src/main.rs`).
 
 ### Benchmarks
 
-Copypasta has two benchmark layers:
+Rip Multi Paste has two benchmark layers:
 
 - **In-process Criterion benchmarks** for deterministic hot paths:
 
@@ -68,7 +68,7 @@ cargo bench --bench history --bench picker_search
   `hotkey_to_open_us`, `snapshot_us`, `class_registration_us`, `create_window_us`,
   `show_window_us`, `total_us`, and `items`.
 
-Use those logs for Copypasta’s hotkey-to-picker-submitted timing. Compare Windows `Win+V`
+Use those logs for Rip Multi Paste's hotkey-to-picker-submitted timing. Compare Windows `Win+V`
 with an external workflow measurement, because the Windows clipboard history UI belongs to
 the shell and does not expose a stable public timing API.
 
@@ -104,22 +104,25 @@ Current local baseline after adding the first coverage pass:
 
 ### Data location
 
-Copypasta stores data under your per-user local app data directory (via `directories::ProjectDirs`):
+Rip Multi Paste stores data under your per-user local app data directory (via `directories::ProjectDirs`):
 
 - **DB**: `copypasta.db`
 - **Payload files**: `items/<id>/fmt_<format>.bin`
 
 ### Store packaging (MSIX)
 
-This repo doesn’t include a full MSIX pipeline yet, but the app is designed to be store-friendly:
+This repo includes Microsoft Store packaging scaffolding under `packaging/`:
 
-- local-only storage
-- no network permissions
-- minimal resident footprint
+- `packaging/msix/AppxManifest.xml` contains the Partner Center package identity.
+- `packaging/msix/Assets/` contains generated MSIX logo assets.
+- `packaging/store/` contains Store listing and privacy policy drafts.
+- `scripts/package-msix.ps1` builds and stages the MSIX package.
 
-Typical next steps:
+Build a Store package from PowerShell:
 
-- generate MSIX using a Rust packaging tool (e.g. `cargo-packager`) or Windows tooling
-- add AppX manifest + icons
-- validate capabilities/privacy disclosure
+```powershell
+.\scripts\package-msix.ps1
+```
+
+Before submission, host the privacy policy, review the listing draft, run the Windows App Certification Kit, and upload the generated MSIX in Partner Center.
 
