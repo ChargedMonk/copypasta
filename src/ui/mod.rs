@@ -1,9 +1,19 @@
-use crate::clipboard::item::ClipboardItem;
+use crate::clipboard::item::{ClipboardItem, PayloadStorage};
+use std::cmp::min;
 use std::ffi::c_void;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, FillRect, SelectObject, SetBkMode,
+    SetTextColor, StretchDIBits, BITMAPINFO, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
+    DEFAULT_CHARSET, DEFAULT_PITCH, DIB_RGB_COLORS, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
+    DT_VCENTER, FF_DONTCARE, FW_BOLD, FW_NORMAL, HBRUSH, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS,
+    SRCCOPY, TRANSPARENT,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT, ODS_SELECTED};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SetFocus, VK_BACK, VK_DELETE, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
 };
@@ -11,12 +21,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetSystemMetrics, GetWindowLongPtrW,
     RegisterClassW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
     CREATESTRUCTW, GWLP_USERDATA, HMENU, SM_CXSCREEN, SM_CYSCREEN, SWP_NOZORDER, SW_SHOW,
-    WA_INACTIVE, WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_KEYDOWN,
-    WM_VKEYTOITEM, WS_BORDER, WS_CHILD, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+    WA_INACTIVE, WINDOW_STYLE, WM_ACTIVATE, WM_CHAR, WM_COMMAND, WM_CREATE, WM_DESTROY,
+    WM_DRAWITEM, WM_KEYDOWN, WM_MEASUREITEM, WM_VKEYTOITEM, WS_BORDER, WS_CHILD, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, LBN_DBLCLK, LBS_NOTIFY, LBS_WANTKEYBOARDINPUT, LB_ADDSTRING, LB_GETCOUNT,
-    LB_GETCURSEL, LB_RESETCONTENT, LB_SETCURSEL, WS_VSCROLL,
+    GetForegroundWindow, LBN_DBLCLK, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LBS_WANTKEYBOARDINPUT,
+    LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_RESETCONTENT, LB_SETCURSEL, LB_SETITEMHEIGHT,
+    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_SETFONT, WS_VSCROLL,
 };
 
 const PICKER_CLASS: PCWSTR = w!("CopypastaPickerWindow");
@@ -26,6 +38,18 @@ const PICKER_HEIGHT: i32 = 420;
 const HEADER_ID: usize = 10;
 const LIST_ID: usize = 11;
 const FOOTER_ID: usize = 12;
+const ROW_HEIGHT: i32 = 68;
+const THUMB_SIZE: i32 = 44;
+const COLOR_BG: COLORREF = rgb(248, 245, 239);
+const COLOR_CARD: COLORREF = rgb(255, 252, 247);
+const COLOR_SELECTED: COLORREF = rgb(224, 235, 224);
+const COLOR_TEXT: COLORREF = rgb(36, 36, 36);
+const COLOR_MUTED: COLORREF = rgb(111, 106, 99);
+const COLOR_ACCENT: COLORREF = rgb(118, 150, 126);
+
+const fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
+    COLORREF(r as u32 | ((g as u32) << 8) | ((b as u32) << 16))
+}
 
 pub fn open_picker(main_hwnd: HWND) -> anyhow::Result<()> {
     let state_ptr = unsafe { crate::win::window::get_userdata(main_hwnd) };
@@ -43,6 +67,7 @@ pub fn open_picker(main_hwnd: HWND) -> anyhow::Result<()> {
     }
 
     let target_hwnd = unsafe { GetForegroundWindow() };
+    let base_dir = state.store.lock().base_dir().to_path_buf();
 
     unsafe {
         ensure_picker_class_registered()?;
@@ -53,6 +78,12 @@ pub fn open_picker(main_hwnd: HWND) -> anyhow::Result<()> {
             header_hwnd: HWND(std::ptr::null_mut()),
             list_hwnd: HWND(std::ptr::null_mut()),
             footer_hwnd: HWND(std::ptr::null_mut()),
+            row_font: HFONT(std::ptr::null_mut()),
+            meta_font: HFONT(std::ptr::null_mut()),
+            brush_bg: HBRUSH(std::ptr::null_mut()),
+            brush_card: HBRUSH(std::ptr::null_mut()),
+            brush_selected: HBRUSH(std::ptr::null_mut()),
+            base_dir,
             all_items: snapshot,
             visible_items: Vec::new(),
             search_text: String::new(),
@@ -118,6 +149,12 @@ struct PickerState {
     header_hwnd: HWND,
     list_hwnd: HWND,
     footer_hwnd: HWND,
+    row_font: HFONT,
+    meta_font: HFONT,
+    brush_bg: HBRUSH,
+    brush_card: HBRUSH,
+    brush_selected: HBRUSH,
+    base_dir: PathBuf,
     all_items: Vec<ClipboardItem>,
     visible_items: Vec<usize>,
     search_text: String,
@@ -132,6 +169,11 @@ extern "system" fn picker_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);
 
                 let state = &mut *state_ptr;
+                state.row_font = create_ui_font(18, FW_NORMAL.0 as i32);
+                state.meta_font = create_ui_font(14, FW_NORMAL.0 as i32);
+                state.brush_bg = CreateSolidBrush(COLOR_BG);
+                state.brush_card = CreateSolidBrush(COLOR_CARD);
+                state.brush_selected = CreateSolidBrush(COLOR_SELECTED);
 
                 let header_hwnd = CreateWindowExW(
                     Default::default(),
@@ -156,7 +198,9 @@ extern "system" fn picker_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     WS_CHILD
                         | WS_VISIBLE
                         | WS_VSCROLL
-                        | WINDOW_STYLE((LBS_NOTIFY | LBS_WANTKEYBOARDINPUT) as u32),
+                        | WINDOW_STYLE(
+                            (LBS_NOTIFY | LBS_WANTKEYBOARDINPUT | LBS_OWNERDRAWFIXED) as u32,
+                        ),
                     14,
                     42,
                     532,
@@ -188,9 +232,41 @@ extern "system" fn picker_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 state.list_hwnd = list_hwnd;
                 state.footer_hwnd = footer_hwnd;
 
+                apply_font(header_hwnd, state.row_font);
+                apply_font(list_hwnd, state.row_font);
+                apply_font(footer_hwnd, state.meta_font);
+                let _ = SendMessageW(
+                    list_hwnd,
+                    LB_SETITEMHEIGHT,
+                    Some(WPARAM(0)),
+                    Some(LPARAM(ROW_HEIGHT as isize)),
+                );
+
                 refresh_visible_items(state);
                 let _ = SetFocus(Some(hwnd));
                 LRESULT(0)
+            }
+            WM_MEASUREITEM => {
+                let measure = &mut *(lparam.0 as *mut MEASUREITEMSTRUCT);
+                measure.itemHeight = ROW_HEIGHT as u32;
+                LRESULT(1)
+            }
+            WM_DRAWITEM => {
+                if draw_picker_item(hwnd, lparam) {
+                    return LRESULT(1);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_CTLCOLORSTATIC | WM_CTLCOLORLISTBOX => {
+                let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut PickerState;
+                if !state_ptr.is_null() {
+                    let state = &*state_ptr;
+                    let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut c_void);
+                    let _ = SetBkMode(hdc, TRANSPARENT);
+                    let _ = SetTextColor(hdc, COLOR_TEXT);
+                    return LRESULT(state.brush_bg.0 as isize);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_ACTIVATE => {
                 if (wparam.0 & 0xffff) as u32 == WA_INACTIVE {
@@ -230,6 +306,12 @@ extern "system" fn picker_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 // Drop PickerState.
                 let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut PickerState;
                 if !state_ptr.is_null() {
+                    let state = &*state_ptr;
+                    delete_gdi_object(state.row_font);
+                    delete_gdi_object(state.meta_font);
+                    delete_gdi_object(state.brush_bg);
+                    delete_gdi_object(state.brush_card);
+                    delete_gdi_object(state.brush_selected);
                     drop(Box::from_raw(state_ptr));
                     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                 }
@@ -477,12 +559,11 @@ unsafe fn refresh_visible_items(state: &mut PickerState) {
     );
     for idx in &state.visible_items {
         if let Some(item) = state.all_items.get(*idx) {
-            let wide = to_wide(&item.preview);
             let _ = SendMessageW(
                 state.list_hwnd,
                 LB_ADDSTRING,
                 Some(WPARAM(0)),
-                Some(LPARAM(wide.as_ptr() as isize)),
+                Some(LPARAM(item.id as isize)),
             );
         }
     }
@@ -499,6 +580,267 @@ unsafe fn refresh_visible_items(state: &mut PickerState) {
 fn selected_item(state: &PickerState, visible_idx: usize) -> Option<&ClipboardItem> {
     let item_idx = *state.visible_items.get(visible_idx)?;
     state.all_items.get(item_idx)
+}
+
+unsafe fn create_ui_font(size: i32, weight: i32) -> HFONT {
+    CreateFontW(
+        -size,
+        0,
+        0,
+        0,
+        weight,
+        0,
+        0,
+        0,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH.0 as u32 | FF_DONTCARE.0 as u32,
+        w!("Segoe UI Variable"),
+    )
+}
+
+unsafe fn apply_font(hwnd: HWND, font: HFONT) {
+    if !hwnd.0.is_null() && !font.0.is_null() {
+        let _ = SendMessageW(
+            hwnd,
+            WM_SETFONT,
+            Some(WPARAM(font.0 as usize)),
+            Some(LPARAM(1)),
+        );
+    }
+}
+
+unsafe fn delete_gdi_object<T>(object: T)
+where
+    T: Into<HGDIOBJ>,
+{
+    let object = object.into();
+    if !object.0.is_null() {
+        let _ = DeleteObject(object);
+    }
+}
+
+unsafe fn draw_picker_item(hwnd: HWND, lparam: LPARAM) -> bool {
+    let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut PickerState;
+    if state_ptr.is_null() || lparam.0 == 0 {
+        return false;
+    }
+    let state = &*state_ptr;
+    let draw = &*(lparam.0 as *const DRAWITEMSTRUCT);
+    if draw.itemID == u32::MAX {
+        return true;
+    }
+    let Some(item) = selected_item(state, draw.itemID as usize) else {
+        return true;
+    };
+
+    let selected = (draw.itemState.0 & ODS_SELECTED.0) != 0;
+    let brush = if selected {
+        state.brush_selected
+    } else {
+        state.brush_card
+    };
+    let _ = FillRect(draw.hDC, &draw.rcItem, brush);
+    let _ = SetBkMode(draw.hDC, TRANSPARENT);
+
+    let thumb = RECT {
+        left: draw.rcItem.left + 12,
+        top: draw.rcItem.top + 12,
+        right: draw.rcItem.left + 12 + THUMB_SIZE,
+        bottom: draw.rcItem.top + 12 + THUMB_SIZE,
+    };
+    draw_thumbnail_or_badge(draw.hDC, &thumb, item, &state.base_dir);
+
+    let text_left = thumb.right + 12;
+    let text_right = draw.rcItem.right - 12;
+    let mut title_rect = RECT {
+        left: text_left,
+        top: draw.rcItem.top + 11,
+        right: text_right,
+        bottom: draw.rcItem.top + 36,
+    };
+    let mut meta_rect = RECT {
+        left: text_left,
+        top: draw.rcItem.top + 38,
+        right: text_right,
+        bottom: draw.rcItem.bottom - 8,
+    };
+
+    let old_font = SelectObject(draw.hDC, HGDIOBJ(state.row_font.0));
+    let _ = SetTextColor(draw.hDC, COLOR_TEXT);
+    draw_text(draw.hDC, &item.preview, &mut title_rect);
+    let _ = SelectObject(draw.hDC, old_font);
+
+    let old_font = SelectObject(draw.hDC, HGDIOBJ(state.meta_font.0));
+    let _ = SetTextColor(draw.hDC, COLOR_MUTED);
+    draw_text(draw.hDC, item_kind_label(item), &mut meta_rect);
+    let _ = SelectObject(draw.hDC, old_font);
+    true
+}
+
+unsafe fn draw_text(hdc: windows::Win32::Graphics::Gdi::HDC, text: &str, rect: &mut RECT) {
+    let mut wide = to_wide(text);
+    let _ = DrawTextW(
+        hdc,
+        &mut wide,
+        rect,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+    );
+}
+
+unsafe fn draw_thumbnail_or_badge(
+    hdc: windows::Win32::Graphics::Gdi::HDC,
+    rect: &RECT,
+    item: &ClipboardItem,
+    base_dir: &Path,
+) {
+    if draw_dib_thumbnail(hdc, rect, item, base_dir) {
+        return;
+    }
+
+    let badge_brush = CreateSolidBrush(rgb(232, 226, 216));
+    let _ = FillRect(hdc, rect, badge_brush);
+    delete_gdi_object(badge_brush);
+    let mut badge_rect = *rect;
+    let badge_font = CreateFontW(
+        -13,
+        0,
+        0,
+        0,
+        FW_BOLD.0 as i32,
+        0,
+        0,
+        0,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH.0 as u32 | FF_DONTCARE.0 as u32,
+        w!("Segoe UI Variable"),
+    );
+    let old_font = SelectObject(hdc, HGDIOBJ(badge_font.0));
+    let _ = SetTextColor(hdc, COLOR_ACCENT);
+    draw_text(hdc, item_badge(item), &mut badge_rect);
+    let _ = SelectObject(hdc, old_font);
+    delete_gdi_object(badge_font);
+}
+
+unsafe fn draw_dib_thumbnail(
+    hdc: windows::Win32::Graphics::Gdi::HDC,
+    rect: &RECT,
+    item: &ClipboardItem,
+    base_dir: &Path,
+) -> bool {
+    let Some(bytes) = image_payload_bytes(item, base_dir) else {
+        return false;
+    };
+    let Some((width, height, bits_offset)) = dib_info(&bytes) else {
+        return false;
+    };
+    let bits = bytes.as_ptr().add(bits_offset) as *const c_void;
+    let info = bytes.as_ptr() as *const BITMAPINFO;
+    let _ = StretchDIBits(
+        hdc,
+        rect.left,
+        rect.top,
+        rect.right - rect.left,
+        rect.bottom - rect.top,
+        0,
+        0,
+        width,
+        height,
+        Some(bits),
+        info,
+        DIB_RGB_COLORS,
+        SRCCOPY,
+    );
+    true
+}
+
+fn image_payload_bytes(item: &ClipboardItem, base_dir: &Path) -> Option<Vec<u8>> {
+    let payload = item.formats.iter().find(|payload| {
+        payload.format == crate::clipboard::formats::CF_DIB
+            || payload.format == crate::clipboard::formats::CF_DIBV5
+    })?;
+    match &payload.storage {
+        PayloadStorage::Inline(bytes) => Some(bytes.clone()),
+        PayloadStorage::File { rel_path, size } => {
+            if *size > 8 * 1024 * 1024 {
+                return None;
+            }
+            std::fs::read(base_dir.join(rel_path)).ok()
+        }
+    }
+}
+
+fn dib_info(bytes: &[u8]) -> Option<(i32, i32, usize)> {
+    if bytes.len() < 40 {
+        return None;
+    }
+    let header_size = u32::from_le_bytes(bytes[0..4].try_into().ok()?) as usize;
+    if header_size < 40 || header_size > bytes.len() {
+        return None;
+    }
+    let width = i32::from_le_bytes(bytes[4..8].try_into().ok()?);
+    let height = i32::from_le_bytes(bytes[8..12].try_into().ok()?);
+    let bit_count = u16::from_le_bytes(bytes[14..16].try_into().ok()?);
+    let compression = u32::from_le_bytes(bytes[16..20].try_into().ok()?);
+    let colors_used = u32::from_le_bytes(bytes[32..36].try_into().ok()?) as usize;
+    let color_entries = if bit_count <= 8 {
+        if colors_used == 0 {
+            1usize << bit_count
+        } else {
+            colors_used
+        }
+    } else {
+        0
+    };
+    let masks = if compression == 3 && header_size == 40 {
+        12
+    } else {
+        0
+    };
+    let bits_offset = min(bytes.len(), header_size + masks + color_entries * 4);
+    if width == 0 || height == 0 || bits_offset >= bytes.len() {
+        return None;
+    }
+    Some((width.abs(), height.abs(), bits_offset))
+}
+
+fn item_kind_label(item: &ClipboardItem) -> &'static str {
+    if item.formats.iter().any(|p| {
+        p.format == crate::clipboard::formats::CF_DIB
+            || p.format == crate::clipboard::formats::CF_DIBV5
+    }) {
+        "Image preview"
+    } else if item.preview.starts_with("HTML:") {
+        "HTML content"
+    } else if item.preview.starts_with("Rich text:") {
+        "Rich text"
+    } else if item.preview.contains(" file") {
+        "File drop"
+    } else {
+        "Text"
+    }
+}
+
+fn item_badge(item: &ClipboardItem) -> &'static str {
+    if item.formats.iter().any(|p| {
+        p.format == crate::clipboard::formats::CF_DIB
+            || p.format == crate::clipboard::formats::CF_DIBV5
+    }) {
+        "IMG"
+    } else if item.preview.starts_with("HTML:") {
+        "HTML"
+    } else if item.preview.starts_with("Rich text:") {
+        "RTF"
+    } else if item.preview.contains(" file") {
+        "FILE"
+    } else {
+        "TXT"
+    }
 }
 
 fn unix_ms_now() -> i64 {

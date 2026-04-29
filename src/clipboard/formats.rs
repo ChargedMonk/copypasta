@@ -9,11 +9,11 @@ use windows::Win32::System::DataExchange::{
 };
 use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 
-const CF_TEXT: u32 = 1;
-const CF_UNICODETEXT: u32 = 13;
-const CF_DIB: u32 = 8;
-const CF_DIBV5: u32 = 17;
-const CF_HDROP: u32 = 15;
+pub const CF_TEXT: u32 = 1;
+pub const CF_UNICODETEXT: u32 = 13;
+pub const CF_DIB: u32 = 8;
+pub const CF_DIBV5: u32 = 17;
+pub const CF_HDROP: u32 = 15;
 
 static HTML_FORMAT: OnceLock<u32> = OnceLock::new();
 static RTF_FORMAT: OnceLock<u32> = OnceLock::new();
@@ -139,22 +139,41 @@ fn pick_preview(formats: &[ClipboardFormatPayload], html_id: u32, rtf_id: u32) -
             return make_preview(&normalize_text(&s));
         }
     }
-    if html_id != 0 && formats.iter().any(|p| p.format == html_id) {
-        return "<html>".to_string();
+    if html_id != 0 {
+        if let Some(html) = formats.iter().find(|p| p.format == html_id) {
+            if let Some(s) = try_decode_utf8(payload_bytes(html)) {
+                let text = html_to_preview_text(&s);
+                if !text.is_empty() {
+                    return format!("HTML: {}", make_preview(&text));
+                }
+            }
+            return "HTML content".to_string();
+        }
     }
-    if rtf_id != 0 && formats.iter().any(|p| p.format == rtf_id) {
-        return "<rtf>".to_string();
+    if rtf_id != 0 {
+        if let Some(rtf) = formats.iter().find(|p| p.format == rtf_id) {
+            if let Some(s) = try_decode_utf8(payload_bytes(rtf)) {
+                let text = rtf_to_preview_text(&s);
+                if !text.is_empty() {
+                    return format!("Rich text: {}", make_preview(&text));
+                }
+            }
+            return "Rich text".to_string();
+        }
     }
     if formats
         .iter()
         .any(|p| p.format == CF_DIB || p.format == CF_DIBV5)
     {
-        return "<image>".to_string();
+        return "Image content".to_string();
     }
-    if formats.iter().any(|p| p.format == CF_HDROP) {
-        return "<files>".to_string();
+    if let Some(files) = formats.iter().find(|p| p.format == CF_HDROP) {
+        if let Some(label) = files_to_preview_text(payload_bytes(files)) {
+            return label;
+        }
+        return "Files".to_string();
     }
-    "<clipboard>".to_string()
+    "Clipboard content".to_string()
 }
 
 fn pick_fingerprint(formats: &[ClipboardFormatPayload], html_id: u32) -> [u8; 32] {
@@ -215,6 +234,12 @@ fn try_decode_utf16z(bytes: &[u8]) -> Option<String> {
     Some(String::from_utf16_lossy(&u16s[..nul]))
 }
 
+fn try_decode_utf8(bytes: &[u8]) -> Option<String> {
+    std::str::from_utf8(bytes)
+        .map(|s| s.trim_end_matches('\0').to_string())
+        .ok()
+}
+
 fn normalize_text(s: &str) -> String {
     let s = s.replace("\r\n", "\n");
     s.trim_end_matches(['\u{0}', '\n', '\r', ' ', '\t'])
@@ -232,4 +257,178 @@ fn make_preview(s: &str) -> String {
     } else {
         line
     }
+}
+
+fn html_to_preview_text(html: &str) -> String {
+    let fragment = html_fragment(html).unwrap_or(html);
+    let mut out = String::with_capacity(fragment.len().min(256));
+    let mut in_tag = false;
+    let mut entity = String::new();
+    let mut in_entity = false;
+
+    for ch in fragment.chars() {
+        if in_tag {
+            if ch == '>' {
+                in_tag = false;
+                out.push(' ');
+            }
+            continue;
+        }
+        if in_entity {
+            if ch == ';' {
+                out.push_str(match entity.as_str() {
+                    "amp" => "&",
+                    "lt" => "<",
+                    "gt" => ">",
+                    "quot" => "\"",
+                    "nbsp" => " ",
+                    _ => "",
+                });
+                entity.clear();
+                in_entity = false;
+            } else if entity.len() < 12 {
+                entity.push(ch);
+            } else {
+                entity.clear();
+                in_entity = false;
+            }
+            continue;
+        }
+        match ch {
+            '<' => in_tag = true,
+            '&' => in_entity = true,
+            _ => out.push(ch),
+        }
+    }
+
+    collapse_spaces(&out)
+}
+
+fn html_fragment(html: &str) -> Option<&str> {
+    let start = read_html_offset(html, "StartFragment:")?;
+    let end = read_html_offset(html, "EndFragment:")?;
+    if start < end && end <= html.len() {
+        Some(&html[start..end])
+    } else {
+        None
+    }
+}
+
+fn read_html_offset(html: &str, label: &str) -> Option<usize> {
+    let start = html.find(label)? + label.len();
+    let rest = &html[start..];
+    let digits: String = rest.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+fn rtf_to_preview_text(rtf: &str) -> String {
+    let mut out = String::new();
+    let mut chars = rtf.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                let mut word = String::new();
+                while let Some(next) = chars.peek() {
+                    if next.is_ascii_alphabetic() {
+                        word.push(*next);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if word == "par" || word == "line" {
+                    out.push(' ');
+                }
+                while let Some(next) = chars.peek() {
+                    if next.is_ascii_digit() || *next == '-' {
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if matches!(chars.peek(), Some(' ')) {
+                    chars.next();
+                }
+            }
+            '{' | '}' => {}
+            '\r' | '\n' => out.push(' '),
+            _ => out.push(ch),
+        }
+    }
+    collapse_spaces(&out)
+}
+
+fn files_to_preview_text(bytes: &[u8]) -> Option<String> {
+    if bytes.len() < 20 {
+        return None;
+    }
+    let offset = u32::from_le_bytes(bytes[0..4].try_into().ok()?) as usize;
+    let wide = u32::from_le_bytes(bytes[16..20].try_into().ok()?) != 0;
+    if offset >= bytes.len() {
+        return None;
+    }
+
+    let names = if wide {
+        parse_wide_file_list(&bytes[offset..])
+    } else {
+        parse_ansi_file_list(&bytes[offset..])
+    };
+    if names.is_empty() {
+        return None;
+    }
+
+    let shown: Vec<&str> = names.iter().take(2).map(String::as_str).collect();
+    let suffix = if names.len() > shown.len() {
+        format!(" +{} more", names.len() - shown.len())
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "{} file{}: {}{}",
+        names.len(),
+        if names.len() == 1 { "" } else { "s" },
+        shown.join(", "),
+        suffix
+    ))
+}
+
+fn parse_wide_file_list(bytes: &[u8]) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut current = Vec::new();
+    for chunk in bytes.chunks_exact(2) {
+        let value = u16::from_le_bytes([chunk[0], chunk[1]]);
+        if value == 0 {
+            if current.is_empty() {
+                break;
+            }
+            names.push(file_name_only(&String::from_utf16_lossy(&current)));
+            current.clear();
+        } else {
+            current.push(value);
+        }
+    }
+    names
+}
+
+fn parse_ansi_file_list(bytes: &[u8]) -> Vec<String> {
+    let mut names = Vec::new();
+    for part in bytes.split(|b| *b == 0) {
+        if part.is_empty() {
+            break;
+        }
+        names.push(file_name_only(&String::from_utf8_lossy(part)));
+    }
+    names
+}
+
+fn file_name_only(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn collapse_spaces(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
