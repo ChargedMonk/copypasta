@@ -1,4 +1,4 @@
-# Rip Multi Paste Store Listing Draft
+# Rip Multi Paste Store Listing
 
 ## Short Description
 
