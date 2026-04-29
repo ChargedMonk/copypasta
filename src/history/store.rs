@@ -247,4 +247,12 @@ impl Store {
         let _ = fs::create_dir_all(&items_dir);
         Ok(())
     }
+
+    pub fn delete_item(&mut self, id: u64) -> anyhow::Result<()> {
+        self.conn
+            .execute("DELETE FROM items WHERE id=?1", params![id as i64])?;
+        let item_dir = self.base_dir.join("items").join(id.to_string());
+        let _ = fs::remove_dir_all(item_dir);
+        Ok(())
+    }
 }

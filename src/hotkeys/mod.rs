@@ -47,6 +47,10 @@ pub struct HotkeyFailure {
 
 pub fn register(hwnd: HWND) -> HotkeyRegistrationReport {
     let config = HotkeyConfig::load_or_default();
+    register_config(hwnd, &config)
+}
+
+pub fn register_config(hwnd: HWND, config: &HotkeyConfig) -> HotkeyRegistrationReport {
     let mut report = HotkeyRegistrationReport::new();
 
     unsafe {
@@ -72,12 +76,15 @@ pub fn register(hwnd: HWND) -> HotkeyRegistrationReport {
         );
     }
     if !report.open_picker_available() {
-        tracing::warn!(
-            "picker hotkey is unavailable; use the tray icon menu or edit hotkeys.json and restart"
-        );
+        tracing::warn!("picker hotkey is unavailable; use the tray icon menu or Settings");
     }
 
     report
+}
+
+pub fn apply_config(hwnd: HWND, config: &HotkeyConfig) -> HotkeyRegistrationReport {
+    unregister(hwnd);
+    register_config(hwnd, config)
 }
 
 pub fn unregister(hwnd: HWND) {
@@ -136,14 +143,14 @@ unsafe fn register_spec(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct HotkeyConfig {
-    open_picker: HotkeySpec,
-    capture: HotkeySpec,
-    quit_dev: HotkeySpec,
+pub struct HotkeyConfig {
+    pub open_picker: HotkeySpec,
+    pub capture: HotkeySpec,
+    pub quit_dev: HotkeySpec,
 }
 
 impl HotkeyConfig {
-    fn default_config() -> Self {
+    pub fn default_config() -> Self {
         Self {
             open_picker: HotkeySpec::new(&["win", "ctrl", "alt"], "V"),
             capture: HotkeySpec::new(&["win", "ctrl", "alt"], "C"),
@@ -151,7 +158,7 @@ impl HotkeyConfig {
         }
     }
 
-    fn load_or_default() -> Self {
+    pub fn load_or_default() -> Self {
         let default = Self::default_config();
         let Some(path) = config_path() else {
             return default;
@@ -179,23 +186,65 @@ impl HotkeyConfig {
             }
         }
     }
+
+    pub fn save(&self) -> anyhow::Result<()> {
+        let Some(path) = config_path() else {
+            anyhow::bail!("config directory unavailable");
+        };
+        write_default_config(&path, self)
+    }
+
+    pub fn reset_defaults(&mut self) {
+        *self = Self::default_config();
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        self.open_picker
+            .validate()
+            .context("invalid open picker hotkey")?;
+        self.capture.validate().context("invalid capture hotkey")?;
+        self.quit_dev.validate().context("invalid quit hotkey")?;
+        Ok(())
+    }
+}
+
+impl Default for HotkeyConfig {
+    fn default() -> Self {
+        Self::default_config()
+    }
+}
+
+impl HotkeyRegistrationReport {
+    pub fn required_hotkeys_available(&self) -> bool {
+        self.registered
+            .iter()
+            .any(|binding| binding.id == HK_OPEN_PICKER)
+            && self
+                .registered
+                .iter()
+                .any(|binding| binding.id == HK_CAPTURE)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct HotkeySpec {
-    modifiers: Vec<String>,
-    key: String,
+pub struct HotkeySpec {
+    pub modifiers: Vec<String>,
+    pub key: String,
 }
 
 impl HotkeySpec {
-    fn new(modifiers: &[&str], key: &str) -> Self {
+    pub fn new(modifiers: &[&str], key: &str) -> Self {
         Self {
             modifiers: modifiers.iter().map(|s| s.to_string()).collect(),
             key: key.to_string(),
         }
     }
 
-    fn label(&self) -> String {
+    pub fn from_owned(modifiers: Vec<String>, key: String) -> Self {
+        Self { modifiers, key }
+    }
+
+    pub fn label(&self) -> String {
         let mut parts: Vec<String> = self
             .modifiers
             .iter()
@@ -205,7 +254,7 @@ impl HotkeySpec {
         parts.join("+")
     }
 
-    fn modifiers(&self) -> Option<HOT_KEY_MODIFIERS> {
+    pub fn modifiers(&self) -> Option<HOT_KEY_MODIFIERS> {
         let mut value = HOT_KEY_MODIFIERS(0);
         for modifier in &self.modifiers {
             value |= match modifier.trim().to_ascii_lowercase().as_str() {
@@ -219,7 +268,7 @@ impl HotkeySpec {
         Some(value)
     }
 
-    fn vk(&self) -> Option<u32> {
+    pub fn vk(&self) -> Option<u32> {
         let key = self.key.trim().to_ascii_uppercase();
         if key.len() == 1 {
             let b = key.as_bytes()[0];
@@ -236,6 +285,19 @@ impl HotkeySpec {
         }
 
         None
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if self.modifiers().is_none() {
+            anyhow::bail!("unknown modifier");
+        }
+        if self.modifiers.is_empty() {
+            anyhow::bail!("at least one modifier is required");
+        }
+        if self.vk().is_none() {
+            anyhow::bail!("unsupported key");
+        }
+        Ok(())
     }
 }
 

@@ -5,6 +5,7 @@ mod clipboard;
 mod history;
 mod hotkeys;
 mod paste;
+mod settings;
 mod state;
 mod tray;
 mod ui;

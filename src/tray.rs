@@ -19,17 +19,20 @@ const TRAY_UID: u32 = 1;
 const CMD_TOGGLE_PAUSE: u16 = 1001;
 const CMD_CLEAR_HISTORY: u16 = 1002;
 const CMD_EXIT: u16 = 1003;
+const CMD_SETTINGS: u16 = 1004;
 
 pub fn add(hwnd: HWND) -> anyhow::Result<()> {
     unsafe {
         let hicon = LoadIconW(None, IDI_APPLICATION).context("LoadIconW")?;
-        let mut nid = NOTIFYICONDATAW::default();
-        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-        nid.hWnd = hwnd;
-        nid.uID = TRAY_UID;
-        nid.uFlags = NIF_MESSAGE | NIF_TIP | NIF_ICON;
-        nid.uCallbackMessage = WM_TRAYICON;
-        nid.hIcon = hicon;
+        let mut nid = NOTIFYICONDATAW {
+            cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+            hWnd: hwnd,
+            uID: TRAY_UID,
+            uFlags: NIF_MESSAGE | NIF_TIP | NIF_ICON,
+            uCallbackMessage: WM_TRAYICON,
+            hIcon: hicon,
+            ..Default::default()
+        };
 
         let tip = "Copypasta";
         let mut wide: Vec<u16> = tip.encode_utf16().collect();
@@ -38,7 +41,7 @@ pub fn add(hwnd: HWND) -> anyhow::Result<()> {
             nid.szTip[i] = ch;
         }
 
-        if !Shell_NotifyIconW(NIM_ADD, &mut nid).as_bool() {
+        if !Shell_NotifyIconW(NIM_ADD, &nid).as_bool() {
             anyhow::bail!("Shell_NotifyIconW(NIM_ADD) failed");
         }
     }
@@ -47,11 +50,13 @@ pub fn add(hwnd: HWND) -> anyhow::Result<()> {
 
 pub fn remove(hwnd: HWND) {
     unsafe {
-        let mut nid = NOTIFYICONDATAW::default();
-        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-        nid.hWnd = hwnd;
-        nid.uID = TRAY_UID;
-        let _ = Shell_NotifyIconW(NIM_DELETE, &mut nid);
+        let nid = NOTIFYICONDATAW {
+            cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+            hWnd: hwnd,
+            uID: TRAY_UID,
+            ..Default::default()
+        };
+        let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
     }
 }
 
@@ -89,6 +94,12 @@ pub fn handle_command(hwnd: HWND, wparam: WPARAM) -> bool {
             CMD_CLEAR_HISTORY => {
                 let _ = state.store.lock().clear_all();
                 state.history.lock().clear();
+                true
+            }
+            CMD_SETTINGS => {
+                if let Err(err) = crate::settings::open_settings(hwnd) {
+                    tracing::warn!(error = ?err, "open settings failed");
+                }
                 true
             }
             CMD_EXIT => {
@@ -133,6 +144,7 @@ unsafe fn show_menu(hwnd: HWND) {
         CMD_CLEAR_HISTORY as usize,
         w!("Clear history"),
     );
+    let _ = AppendMenuW(hmenu, MF_STRING, CMD_SETTINGS as usize, w!("Settings"));
     let _ = AppendMenuW(hmenu, MF_STRING, CMD_EXIT as usize, w!("Exit"));
 
     let mut pt = POINT::default();

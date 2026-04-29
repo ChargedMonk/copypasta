@@ -106,8 +106,10 @@ unsafe fn send_ctrl_key(vk: VIRTUAL_KEY) -> anyhow::Result<()> {
 }
 
 fn key_input(vk: VIRTUAL_KEY, key_up: bool) -> INPUT {
-    let mut ki = KEYBDINPUT::default();
-    ki.wVk = vk;
+    let mut ki = KEYBDINPUT {
+        wVk: vk,
+        ..Default::default()
+    };
     if key_up {
         ki.dwFlags = KEYEVENTF_KEYUP;
     }
