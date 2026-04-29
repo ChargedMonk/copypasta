@@ -1,16 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod app;
-mod clipboard;
-mod history;
-mod hotkeys;
-mod paste;
-mod settings;
-mod state;
-mod tray;
-mod ui;
-mod win;
-
 use anyhow::Context;
 
 fn main() -> anyhow::Result<()> {
@@ -21,6 +10,6 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    app::run().context("app run failed")?;
+    copypasta::app::run().context("app run failed")?;
     Ok(())
 }

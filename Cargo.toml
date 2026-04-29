@@ -29,3 +29,14 @@ windows = { version = "0.61", features = [
 ] }
 serde_json = "1.0.149"
 
+[dev-dependencies]
+criterion = "0.8.2"
+tempfile = "3.27.0"
+
+[[bench]]
+name = "history"
+harness = false
+
+[[bench]]
+name = "picker_search"
+harness = false

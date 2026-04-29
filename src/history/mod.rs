@@ -101,4 +101,64 @@ mod tests {
         assert!(!history.remove_by_id(99));
         assert_eq!(history.len(), 1);
     }
+
+    #[test]
+    fn bump_by_fingerprint_moves_existing_item_to_front() {
+        let mut history = History::new(10);
+        history.add_or_bump_full(item(1));
+        history.add_or_bump_full(item(2));
+        history.add_or_bump_full(item(3));
+
+        assert!(history.bump_by_fingerprint([1; 32]));
+
+        let ids: Vec<u64> = history.items().map(|item| item.id).collect();
+        assert_eq!(ids, vec![1, 3, 2]);
+    }
+
+    #[test]
+    fn bump_by_fingerprint_leaves_front_item_in_place() {
+        let mut history = History::new(10);
+        history.add_or_bump_full(item(1));
+        history.add_or_bump_full(item(2));
+
+        assert!(history.bump_by_fingerprint([2; 32]));
+
+        let ids: Vec<u64> = history.items().map(|item| item.id).collect();
+        assert_eq!(ids, vec![2, 1]);
+    }
+
+    #[test]
+    fn add_or_bump_full_deduplicates_by_fingerprint() {
+        let mut history = History::new(10);
+        history.add_or_bump_full(item(1));
+        history.add_or_bump_full(item(2));
+        history.add_or_bump_full(item(1));
+
+        let ids: Vec<u64> = history.items().map(|item| item.id).collect();
+        assert_eq!(ids, vec![1, 2]);
+        assert_eq!(history.len(), 2);
+    }
+
+    #[test]
+    fn add_or_bump_full_trims_to_max_items() {
+        let mut history = History::new(2);
+        history.add_or_bump_full(item(1));
+        history.add_or_bump_full(item(2));
+        history.add_or_bump_full(item(3));
+
+        let ids: Vec<u64> = history.items().map(|item| item.id).collect();
+        assert_eq!(ids, vec![3, 2]);
+    }
+
+    #[test]
+    fn clear_removes_all_items() {
+        let mut history = History::new(10);
+        history.add_or_bump_full(item(1));
+        history.add_or_bump_full(item(2));
+
+        history.clear();
+
+        assert_eq!(history.len(), 0);
+        assert_eq!(history.items().count(), 0);
+    }
 }

@@ -378,4 +378,63 @@ mod tests {
         );
         assert_eq!(HotkeySpec::new(&["ctrl", "alt"], "F12").vk(), Some(0x7B));
     }
+
+    #[test]
+    fn report_marks_required_hotkeys_available_only_when_both_registered() {
+        let both = HotkeyRegistrationReport {
+            registered: vec![
+                HotkeyBinding {
+                    id: HK_OPEN_PICKER,
+                    label: "Win+Ctrl+Alt+V".to_string(),
+                },
+                HotkeyBinding {
+                    id: HK_CAPTURE,
+                    label: "Win+Ctrl+Alt+C".to_string(),
+                },
+            ],
+            failed: Vec::new(),
+        };
+        let picker_only = HotkeyRegistrationReport {
+            registered: vec![HotkeyBinding {
+                id: HK_OPEN_PICKER,
+                label: "Win+Ctrl+Alt+V".to_string(),
+            }],
+            failed: Vec::new(),
+        };
+
+        assert!(both.required_hotkeys_available());
+        assert!(!picker_only.required_hotkeys_available());
+    }
+
+    #[test]
+    fn hotkey_spec_normalizes_modifier_labels() {
+        let spec = HotkeySpec::new(&[" windows ", "control", "super"], "f1");
+
+        assert_eq!(spec.label(), "Win+Ctrl+Win+F1");
+    }
+
+    #[test]
+    fn hotkey_spec_parses_modifier_bits() {
+        let spec = HotkeySpec::new(&["win", "ctrl", "alt", "shift"], "K");
+        let modifiers = spec.modifiers().unwrap();
+
+        assert_eq!(modifiers.0, (MOD_WIN | MOD_CONTROL | MOD_ALT | MOD_SHIFT).0);
+    }
+
+    #[test]
+    fn hotkey_spec_rejects_invalid_inputs() {
+        assert!(HotkeySpec::new(&["hyper"], "V").validate().is_err());
+        assert!(HotkeySpec::new(&[], "V").validate().is_err());
+        assert!(HotkeySpec::new(&["ctrl"], "F25").validate().is_err());
+        assert!(HotkeySpec::new(&["ctrl"], "Enter").validate().is_err());
+    }
+
+    #[test]
+    fn hotkey_config_validate_reports_action_context() {
+        let mut config = HotkeyConfig::default_config();
+        config.capture = HotkeySpec::new(&["ctrl"], "F25");
+
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("invalid capture hotkey"));
+    }
 }

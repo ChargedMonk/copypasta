@@ -53,6 +53,55 @@ cargo build --release
 
 Release builds hide the console window (see `src/main.rs`).
 
+### Benchmarks
+
+Copypasta has two benchmark layers:
+
+- **In-process Criterion benchmarks** for deterministic hot paths:
+
+```bash
+cargo bench --bench history --bench picker_search
+```
+
+- **Picker-open latency probes** for the user-visible path. In a dev build, pressing the picker
+  hotkey logs a `picker latency` event with:
+  `hotkey_to_open_us`, `snapshot_us`, `class_registration_us`, `create_window_us`,
+  `show_window_us`, `total_us`, and `items`.
+
+Use those logs for Copypasta’s hotkey-to-picker-submitted timing. Compare Windows `Win+V`
+with an external workflow measurement, because the Windows clipboard history UI belongs to
+the shell and does not expose a stable public timing API.
+
+Current local Criterion baseline:
+
+| Benchmark | Mean-ish range |
+| --- | ---: |
+| History add 50 unique items | 15.979-18.618 us |
+| History bump oldest item in 50 | 6.9091-8.2583 us |
+| History remove middle item in 50 | 5.6900-6.8097 us |
+| Picker search empty query, 50 short previews | 1.6069-1.9752 us |
+| Picker search matching query, 50 short previews | 16.715-20.005 us |
+| Picker search matching query, 50 long previews | 17.398-21.752 us |
+| Picker search missing query, 50 long previews | 19.189-22.454 us |
+
+### Coverage
+
+Coverage uses `cargo-llvm-cov`:
+
+```bash
+cargo install cargo-llvm-cov
+cargo llvm-cov --html
+cargo llvm-cov report --summary-only
+```
+
+Current local baseline after adding the first coverage pass:
+
+- Tests: 33 passed
+- Line coverage: 33.74%
+- Function coverage: 46.73%
+- Region coverage: 36.92%
+- HTML report: `target/llvm-cov/html`
+
 ### Data location
 
 Copypasta stores data under your per-user local app data directory (via `directories::ProjectDirs`):

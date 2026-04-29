@@ -1,0 +1,10 @@
+pub mod app;
+pub mod clipboard;
+pub mod history;
+pub mod hotkeys;
+pub mod paste;
+pub mod settings;
+pub mod state;
+pub mod tray;
+pub mod ui;
+pub mod win;

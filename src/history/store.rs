@@ -16,6 +16,10 @@ impl Store {
         let proj = ProjectDirs::from("com", "VatsalyaBajpai", "Copypasta")
             .context("ProjectDirs not available")?;
         let base_dir = proj.data_local_dir().to_path_buf();
+        Self::open_at(base_dir, 250 * 1024 * 1024)
+    }
+
+    fn open_at(base_dir: PathBuf, max_total_bytes: u64) -> anyhow::Result<Self> {
         fs::create_dir_all(&base_dir).context("create base data dir")?;
 
         let db_path = base_dir.join("copypasta.db");
@@ -46,7 +50,7 @@ impl Store {
         Ok(Self {
             conn,
             base_dir,
-            max_total_bytes: 250 * 1024 * 1024, // 250MB default
+            max_total_bytes,
         })
     }
 
@@ -254,5 +258,106 @@ impl Store {
         let item_dir = self.base_dir.join("items").join(id.to_string());
         let _ = fs::remove_dir_all(item_dir);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn payload(format: u32, bytes: &[u8]) -> ClipboardFormatPayload {
+        ClipboardFormatPayload {
+            format,
+            storage: PayloadStorage::Inline(bytes.to_vec()),
+        }
+    }
+
+    fn store(max_total_bytes: u64) -> (TempDir, Store) {
+        let temp = TempDir::new().unwrap();
+        let store = Store::open_at(temp.path().to_path_buf(), max_total_bytes).unwrap();
+        (temp, store)
+    }
+
+    #[test]
+    fn persist_and_load_recent_round_trips_payload_descriptors() {
+        let (_temp, mut store) = store(1024);
+        let saved = store
+            .persist_captured(100, [1; 32], "hello", &[payload(13, b"hello")])
+            .unwrap();
+
+        let recent = store.load_recent(10).unwrap();
+
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].id, saved.id);
+        assert_eq!(recent[0].preview, "hello");
+        assert_eq!(recent[0].formats.len(), 1);
+        assert!(matches!(
+            recent[0].formats[0].storage,
+            PayloadStorage::File { size: 5, .. }
+        ));
+    }
+
+    #[test]
+    fn duplicate_fingerprint_updates_existing_item_recency() {
+        let (_temp, mut store) = store(1024);
+        let first = store
+            .persist_captured(100, [1; 32], "old", &[payload(13, b"old")])
+            .unwrap();
+        let second = store
+            .persist_captured(200, [1; 32], "new", &[payload(13, b"new")])
+            .unwrap();
+
+        let recent = store.load_recent(10).unwrap();
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].preview, "new");
+        assert_eq!(recent[0].created_unix_ms, 200);
+    }
+
+    #[test]
+    fn delete_item_removes_db_row_and_payload_dir() {
+        let (_temp, mut store) = store(1024);
+        let item = store
+            .persist_captured(100, [1; 32], "delete", &[payload(13, b"delete")])
+            .unwrap();
+        let item_dir = store.base_dir().join("items").join(item.id.to_string());
+        assert!(item_dir.exists());
+
+        store.delete_item(item.id).unwrap();
+
+        assert!(store.load_recent(10).unwrap().is_empty());
+        assert!(!item_dir.exists());
+    }
+
+    #[test]
+    fn clear_all_removes_rows_and_payloads() {
+        let (_temp, mut store) = store(1024);
+        store
+            .persist_captured(100, [1; 32], "one", &[payload(13, b"one")])
+            .unwrap();
+
+        store.clear_all().unwrap();
+
+        assert!(store.load_recent(10).unwrap().is_empty());
+        assert!(store.base_dir().join("items").exists());
+    }
+
+    #[test]
+    fn prune_to_limits_removes_oldest_payloads_first() {
+        let (_temp, mut store) = store(12);
+        store
+            .persist_captured(100, [1; 32], "old", &[payload(13, b"1234567890")])
+            .unwrap();
+        let new_item = store
+            .persist_captured(200, [2; 32], "new", &[payload(13, b"abcdefghij")])
+            .unwrap();
+
+        let recent = store.load_recent(10).unwrap();
+
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].id, new_item.id);
+        assert_eq!(recent[0].preview, "new");
     }
 }

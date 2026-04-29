@@ -1,5 +1,6 @@
 use anyhow::Context;
 use std::ffi::c_void;
+use std::time::Instant;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -105,10 +106,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             }
             WM_HOTKEY => {
                 let id = wparam.0 as i32;
+                let hotkey_received_at = Instant::now();
                 tracing::info!(hotkey_id = id, "hotkey");
                 match id {
                     crate::hotkeys::HK_OPEN_PICKER => {
-                        if let Err(err) = crate::ui::open_picker(hwnd) {
+                        if let Err(err) =
+                            crate::ui::open_picker_from_hotkey(hwnd, hotkey_received_at)
+                        {
                             tracing::warn!(error = ?err, "open picker failed");
                         }
                     }

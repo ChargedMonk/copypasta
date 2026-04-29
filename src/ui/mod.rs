@@ -3,6 +3,7 @@ use std::cmp::min;
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::time::Instant;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
@@ -52,6 +53,11 @@ const fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
 }
 
 pub fn open_picker(main_hwnd: HWND) -> anyhow::Result<()> {
+    open_picker_from_hotkey(main_hwnd, Instant::now())
+}
+
+pub fn open_picker_from_hotkey(main_hwnd: HWND, hotkey_received_at: Instant) -> anyhow::Result<()> {
+    let open_started_at = Instant::now();
     let state_ptr = unsafe { crate::win::window::get_userdata(main_hwnd) };
     if state_ptr.is_null() {
         return Ok(());
@@ -65,12 +71,15 @@ pub fn open_picker(main_hwnd: HWND) -> anyhow::Result<()> {
     if snapshot.is_empty() {
         return Ok(());
     }
+    let snapshot_len = snapshot.len();
+    let snapshot_ready_at = Instant::now();
 
     let target_hwnd = unsafe { GetForegroundWindow() };
     let base_dir = state.store.lock().base_dir().to_path_buf();
 
     unsafe {
         ensure_picker_class_registered()?;
+        let class_ready_at = Instant::now();
 
         let picker_state = Box::new(PickerState {
             app_state: state_ptr as *const crate::state::AppState,
@@ -104,6 +113,7 @@ pub fn open_picker(main_hwnd: HWND) -> anyhow::Result<()> {
             Some(current_hinstance()?),
             Some(picker_state_ptr as *mut c_void),
         )?;
+        let create_window_returned_at = Instant::now();
 
         // Center the picker.
         let sw = GetSystemMetrics(SM_CXSCREEN);
@@ -114,8 +124,23 @@ pub fn open_picker(main_hwnd: HWND) -> anyhow::Result<()> {
 
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetForegroundWindow(hwnd);
+        let show_returned_at = Instant::now();
+        tracing::info!(
+            hotkey_to_open_us = elapsed_us(hotkey_received_at, open_started_at),
+            snapshot_us = elapsed_us(open_started_at, snapshot_ready_at),
+            class_registration_us = elapsed_us(snapshot_ready_at, class_ready_at),
+            create_window_us = elapsed_us(class_ready_at, create_window_returned_at),
+            show_window_us = elapsed_us(create_window_returned_at, show_returned_at),
+            total_us = elapsed_us(hotkey_received_at, show_returned_at),
+            items = snapshot_len,
+            "picker latency"
+        );
         Ok(())
     }
+}
+
+fn elapsed_us(start: Instant, end: Instant) -> u64 {
+    end.saturating_duration_since(start).as_micros() as u64
 }
 
 unsafe fn ensure_picker_class_registered() -> anyhow::Result<()> {
@@ -514,19 +539,7 @@ unsafe fn move_selection(hwnd: HWND, delta: i32) {
 }
 
 unsafe fn refresh_visible_items(state: &mut PickerState) {
-    let query = state.search_text.trim().to_ascii_lowercase();
-    state.visible_items = state
-        .all_items
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, item)| {
-            if query.is_empty() || item.preview.to_ascii_lowercase().contains(&query) {
-                Some(idx)
-            } else {
-                None
-            }
-        })
-        .collect();
+    state.visible_items = visible_indices_for_search(&state.all_items, &state.search_text);
 
     if !state.header_hwnd.0.is_null() {
         let label = if state.search_text.is_empty() {
@@ -575,6 +588,21 @@ unsafe fn refresh_visible_items(state: &mut PickerState) {
             Some(LPARAM(0)),
         );
     }
+}
+
+pub fn visible_indices_for_search(items: &[ClipboardItem], query: &str) -> Vec<usize> {
+    let query = query.trim().to_ascii_lowercase();
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, item)| {
+            if query.is_empty() || item.preview.to_ascii_lowercase().contains(&query) {
+                Some(idx)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn selected_item(state: &PickerState, visible_idx: usize) -> Option<&ClipboardItem> {
@@ -855,4 +883,45 @@ fn to_wide(s: &str) -> Vec<u16> {
     let mut v: Vec<u16> = s.encode_utf16().collect();
     v.push(0);
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clipboard::item::ClipboardItem;
+
+    fn item(id: u64, preview: &str) -> ClipboardItem {
+        ClipboardItem {
+            id,
+            created_unix_ms: id as i64,
+            fingerprint: [id as u8; 32],
+            preview: preview.to_string(),
+            formats: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn visible_indices_returns_all_items_for_empty_query() {
+        let items = vec![item(1, "Alpha"), item(2, "Beta")];
+
+        assert_eq!(visible_indices_for_search(&items, "   "), vec![0, 1]);
+    }
+
+    #[test]
+    fn visible_indices_filters_case_insensitively() {
+        let items = vec![item(1, "Alpha invoice"), item(2, "Beta note")];
+
+        assert_eq!(visible_indices_for_search(&items, "INVOICE"), vec![0]);
+    }
+
+    #[test]
+    fn visible_indices_preserves_source_order() {
+        let items = vec![
+            item(1, "Project alpha"),
+            item(2, "Project beta"),
+            item(3, "Personal note"),
+        ];
+
+        assert_eq!(visible_indices_for_search(&items, "project"), vec![0, 1]);
+    }
 }

@@ -432,3 +432,103 @@ fn file_name_only(path: &str) -> String {
 fn collapse_spaces(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inline(format: u32, bytes: Vec<u8>) -> ClipboardFormatPayload {
+        ClipboardFormatPayload {
+            format,
+            storage: PayloadStorage::Inline(bytes),
+        }
+    }
+
+    fn utf16z(s: &str) -> Vec<u8> {
+        s.encode_utf16()
+            .chain(std::iter::once(0))
+            .flat_map(u16::to_le_bytes)
+            .collect()
+    }
+
+    fn wide_file_list(names: &[&str]) -> Vec<u8> {
+        let mut bytes = vec![0u8; 20];
+        bytes[0..4].copy_from_slice(&20u32.to_le_bytes());
+        bytes[16..20].copy_from_slice(&1u32.to_le_bytes());
+        for name in names {
+            bytes.extend(name.encode_utf16().flat_map(u16::to_le_bytes));
+            bytes.extend(0u16.to_le_bytes());
+        }
+        bytes.extend(0u16.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn utf16_decoder_stops_at_nul() {
+        let mut bytes = utf16z("hello");
+        bytes.extend(utf16z("ignored"));
+
+        assert_eq!(try_decode_utf16z(&bytes), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn normalize_text_unifies_newlines_and_trims_clipboard_padding() {
+        assert_eq!(normalize_text("one\r\ntwo\0 \t\r\n"), "one\ntwo");
+    }
+
+    #[test]
+    fn make_preview_uses_first_line_and_empty_marker() {
+        assert_eq!(make_preview("first\nsecond"), "first");
+        assert_eq!(make_preview(""), "<empty>");
+    }
+
+    #[test]
+    fn html_preview_strips_tags_and_decodes_common_entities() {
+        assert_eq!(
+            html_to_preview_text("<p>Hello&nbsp;<b>world</b> &amp; friends</p>"),
+            "Hello world & friends"
+        );
+    }
+
+    #[test]
+    fn rtf_preview_strips_control_words() {
+        assert_eq!(
+            rtf_to_preview_text(r"{\rtf1\ansi Hello\par bold text}"),
+            "Hello bold text"
+        );
+    }
+
+    #[test]
+    fn file_preview_summarizes_file_drop() {
+        assert_eq!(
+            files_to_preview_text(&wide_file_list(&["a.txt", "b.png", "c.pdf"])),
+            Some("3 files: a.txt, b.png +1 more".to_string())
+        );
+    }
+
+    #[test]
+    fn pick_preview_prefers_unicode_text_over_rich_formats() {
+        let formats = vec![
+            inline(1000, b"<b>HTML</b>".to_vec()),
+            inline(CF_UNICODETEXT, utf16z("plain text")),
+        ];
+
+        assert_eq!(pick_preview(&formats, 1000, 1001), "plain text");
+    }
+
+    #[test]
+    fn fingerprint_normalizes_unicode_text() {
+        let a = vec![inline(CF_UNICODETEXT, utf16z("same\r\ntext\n"))];
+        let b = vec![inline(CF_UNICODETEXT, utf16z("same\ntext"))];
+
+        assert_eq!(pick_fingerprint(&a, 0), pick_fingerprint(&b, 0));
+    }
+
+    #[test]
+    fn fallback_fingerprint_includes_format_boundaries() {
+        let a = vec![inline(2000, b"abc".to_vec())];
+        let b = vec![inline(2001, b"abc".to_vec())];
+
+        assert_ne!(pick_fingerprint(&a, 0), pick_fingerprint(&b, 0));
+    }
+}
