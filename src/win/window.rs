@@ -4,9 +4,10 @@ use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetWindowLongPtrW, PostQuitMessage,
-    RegisterClassW, SetWindowLongPtrW, CREATESTRUCTW, GWLP_USERDATA, WM_CLIPBOARDUPDATE,
-    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WNDCLASSW, WS_OVERLAPPED,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetForegroundWindow, GetWindowLongPtrW,
+    PostQuitMessage, RegisterClassW, SetWindowLongPtrW, CREATESTRUCTW, GWLP_USERDATA,
+    WM_CLIPBOARDUPDATE, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WNDCLASSW,
+    WS_OVERLAPPED,
 };
 
 const WINDOW_CLASS: PCWSTR = w!("CopypastaHiddenWindow");
@@ -112,15 +113,24 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         }
                     }
                     crate::hotkeys::HK_CAPTURE => {
-                        // For now, clipboard updates already capture; keep this reserved for
-                        // future "simulate Ctrl+C then capture" behavior.
+                        let target_hwnd = GetForegroundWindow();
+                        if let Err(err) = crate::paste::copy_ctrl_c_into(target_hwnd) {
+                            tracing::warn!(error = ?err, "copy hotkey failed");
+                        }
                     }
                     crate::hotkeys::HK_QUIT_DEV => {
                         tracing::info!("quit hotkey pressed");
                         let _ = DestroyWindow(hwnd);
+                        PostQuitMessage(0);
                     }
                     _ => {}
                 }
+                LRESULT(0)
+            }
+            WM_CLOSE => {
+                tracing::info!("close requested");
+                let _ = DestroyWindow(hwnd);
+                PostQuitMessage(0);
                 LRESULT(0)
             }
             WM_DESTROY => {

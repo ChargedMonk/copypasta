@@ -9,12 +9,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetSystemMetrics, GetWindowLongPtrW,
     RegisterClassW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
     CREATESTRUCTW, GWLP_USERDATA, HMENU, SM_CXSCREEN, SM_CYSCREEN, SWP_NOZORDER, SW_SHOW,
-    WINDOW_STYLE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_KEYDOWN, WS_BORDER, WS_CHILD,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+    WA_INACTIVE, WINDOW_STYLE, WM_ACTIVATE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_KEYDOWN,
+    WM_VKEYTOITEM, WS_BORDER, WS_CHILD, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, LBN_DBLCLK, LBS_NOTIFY, LB_ADDSTRING, LB_GETCURSEL, LB_SETCURSEL,
-    WS_VSCROLL,
+    GetForegroundWindow, LBN_DBLCLK, LBS_NOTIFY, LBS_WANTKEYBOARDINPUT, LB_ADDSTRING, LB_GETCOUNT,
+    LB_GETCURSEL, LB_SETCURSEL, WS_VSCROLL,
 };
 
 const PICKER_CLASS: PCWSTR = w!("CopypastaPickerWindow");
@@ -123,7 +123,10 @@ extern "system" fn picker_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     Default::default(),
                     w!("LISTBOX"),
                     w!(""),
-                    WS_CHILD | WS_VISIBLE | WS_VSCROLL | WINDOW_STYLE(LBS_NOTIFY as u32),
+                    WS_CHILD
+                        | WS_VISIBLE
+                        | WS_VSCROLL
+                        | WINDOW_STYLE((LBS_NOTIFY | LBS_WANTKEYBOARDINPUT) as u32),
                     8,
                     8,
                     500,
@@ -149,22 +152,25 @@ extern "system" fn picker_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 }
 
                 let _ = SendMessageW(list_hwnd, LB_SETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
-                let _ = SetFocus(Some(list_hwnd));
+                let _ = SetFocus(Some(hwnd));
                 LRESULT(0)
             }
-            WM_KEYDOWN => {
-                let vk = wparam.0 as u16;
-                if vk == VK_ESCAPE.0 {
+            WM_ACTIVATE => {
+                if (wparam.0 & 0xffff) as u32 == WA_INACTIVE {
                     let _ = DestroyWindow(hwnd);
                     return LRESULT(0);
                 }
-                if vk == VK_RETURN.0 {
-                    do_select_and_paste(hwnd);
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_KEYDOWN => {
+                if handle_picker_key(hwnd, wparam.0 as u16) {
                     return LRESULT(0);
                 }
-                // Let listbox handle arrow keys normally when focused.
-                if vk == VK_UP.0 || vk == VK_DOWN.0 {
-                    return DefWindowProcW(hwnd, msg, wparam, lparam);
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_VKEYTOITEM => {
+                if handle_picker_key(hwnd, (wparam.0 & 0xffff) as u16) {
+                    return LRESULT(-2);
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
@@ -189,6 +195,26 @@ extern "system" fn picker_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
+}
+
+unsafe fn handle_picker_key(hwnd: HWND, vk: u16) -> bool {
+    if vk == VK_ESCAPE.0 {
+        let _ = DestroyWindow(hwnd);
+        return true;
+    }
+    if vk == VK_RETURN.0 {
+        do_select_and_paste(hwnd);
+        return true;
+    }
+    if vk == VK_UP.0 {
+        move_selection(hwnd, -1);
+        return true;
+    }
+    if vk == VK_DOWN.0 {
+        move_selection(hwnd, 1);
+        return true;
+    }
+    false
 }
 
 unsafe fn do_select_and_paste(hwnd: HWND) {
@@ -227,6 +253,45 @@ unsafe fn do_select_and_paste(hwnd: HWND) {
     }
 
     let _ = DestroyWindow(hwnd);
+}
+
+unsafe fn move_selection(hwnd: HWND, delta: i32) {
+    let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut PickerState;
+    if state_ptr.is_null() {
+        return;
+    }
+    let state = &mut *state_ptr;
+    if state.list_hwnd.0.is_null() {
+        return;
+    }
+
+    let count = SendMessageW(
+        state.list_hwnd,
+        LB_GETCOUNT,
+        Some(WPARAM(0)),
+        Some(LPARAM(0)),
+    )
+    .0 as i32;
+    if count <= 0 {
+        return;
+    }
+
+    let current = SendMessageW(
+        state.list_hwnd,
+        LB_GETCURSEL,
+        Some(WPARAM(0)),
+        Some(LPARAM(0)),
+    )
+    .0 as i32;
+    let current = if current < 0 { 0 } else { current };
+    let next = (current + delta).clamp(0, count - 1);
+
+    let _ = SendMessageW(
+        state.list_hwnd,
+        LB_SETCURSEL,
+        Some(WPARAM(next as usize)),
+        Some(LPARAM(0)),
+    );
 }
 
 fn unix_ms_now() -> i64 {

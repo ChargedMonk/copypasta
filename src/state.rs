@@ -15,7 +15,7 @@ impl AppState {
         let recent = store.load_recent(50).unwrap_or_default();
 
         let mut history = History::new(50);
-        for item in recent.into_iter() {
+        for item in recent.into_iter().rev() {
             history.add_or_bump_full(item);
         }
 

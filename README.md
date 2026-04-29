@@ -14,7 +14,7 @@ Fast, local-only clipboard history + multi-paste for Windows.
 ### Hotkeys
 
 - **Win + Ctrl + Alt + V**: open picker
-- **Win + Ctrl + Alt + C**: reserved (capture is currently automatic via clipboard updates)
+- **Win + Ctrl + Alt + C**: copy current selection into Windows clipboard, then capture it via clipboard updates
 - **Win + Ctrl + Alt + Q**: dev-only quit hotkey
 
 Hotkeys are configurable in `hotkeys.json` under the per-user app config directory. Copypasta creates this file on first run:

@@ -8,9 +8,9 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyWindow, GetCursorPos, GetWindowLongPtrW, LoadIconW,
-    PostMessageW, SetForegroundWindow, TrackPopupMenu, GWLP_USERDATA, HMENU, IDI_APPLICATION,
-    MF_STRING, TPM_LEFTALIGN, TPM_RETURNCMD, WM_APP, WM_COMMAND, WM_LBUTTONDBLCLK, WM_NULL,
-    WM_RBUTTONUP,
+    PostMessageW, PostQuitMessage, SetForegroundWindow, TrackPopupMenu, GWLP_USERDATA, HMENU,
+    IDI_APPLICATION, MF_STRING, TPM_LEFTALIGN, TPM_RETURNCMD, WM_APP, WM_COMMAND, WM_LBUTTONDBLCLK,
+    WM_NULL, WM_RBUTTONUP,
 };
 
 pub const WM_TRAYICON: u32 = WM_APP + 1;
@@ -93,6 +93,7 @@ pub fn handle_command(hwnd: HWND, wparam: WPARAM) -> bool {
             }
             CMD_EXIT => {
                 let _ = DestroyWindow(hwnd);
+                PostQuitMessage(0);
                 true
             }
             _ => false,
