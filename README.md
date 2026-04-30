@@ -1,6 +1,11 @@
+<img width="640" height="640" alt="logo" src="https://github.com/user-attachments/assets/313a5cb4-4bf7-4a64-ba96-ffce92e009ed" />
+
+
 ## Rip Multi Paste
 
 Fast, local-only clipboard history, search, and multi-paste for Windows.
+
+[Get it from Microsoft Store]([https://www.example.com](https://apps.microsoft.com/detail/9P479B0MZTZ8))
 
 ### Current features
 
@@ -117,3 +122,10 @@ This repo includes Microsoft Store packaging scaffolding under `packaging/`:
 - `packaging/msix/Assets/` contains generated MSIX logo assets.
 - `packaging/store/` contains Store listing and privacy policy drafts.
 - `scripts/package-msix.ps1` builds and stages the MSIX package.
+
+
+<img width="632" height="477" alt="main_example" src="https://github.com/user-attachments/assets/7cecd42d-02f5-44ec-8513-6f237b5b80ae" />
+
+<img width="613" height="463" alt="search_example" src="https://github.com/user-attachments/assets/32aa2c96-e32a-44d7-bd92-49d0da50c2c9" />
+
+
