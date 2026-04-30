@@ -1,17 +1,21 @@
 use anyhow::Context;
 use std::ffi::c_void;
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, POINT, WPARAM};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyWindow, GetCursorPos, GetWindowLongPtrW, LoadIconW,
-    PostMessageW, PostQuitMessage, SetForegroundWindow, TrackPopupMenu, GWLP_USERDATA, HMENU,
+    PostMessageW, PostQuitMessage, SetForegroundWindow, TrackPopupMenu, GWLP_USERDATA, HICON, HMENU,
     IDI_APPLICATION, MF_STRING, TPM_LEFTALIGN, TPM_RETURNCMD, WM_APP, WM_COMMAND, WM_LBUTTONDBLCLK,
     WM_NULL, WM_RBUTTONUP,
 };
+
+/// Icon name ID embedded by `build.rs` via `winresource::WindowsResource::set_icon` (default is `"1"`).
+const APP_ICON_RESOURCE_ID: u16 = 1;
 
 pub const WM_TRAYICON: u32 = WM_APP + 1;
 const TRAY_UID: u32 = 1;
@@ -21,9 +25,30 @@ const CMD_CLEAR_HISTORY: u16 = 1002;
 const CMD_EXIT: u16 = 1003;
 const CMD_SETTINGS: u16 = 1004;
 
+/// Loads the application icon from this executable's resources (`APP_ICON_RESOURCE_ID`),
+/// matching `winresource::WindowsResource::set_icon`'s default ID. Falls back to the stock
+/// application icon if loading fails.
+fn load_app_tray_icon() -> anyhow::Result<HICON> {
+    unsafe {
+        let module = GetModuleHandleW(None).context("GetModuleHandleW")?;
+        let instance = HINSTANCE::from(module);
+        let name = PCWSTR(usize::from(APP_ICON_RESOURCE_ID) as *const u16);
+        match LoadIconW(Some(instance), name) {
+            Ok(icon) => Ok(icon),
+            Err(err) => {
+                tracing::warn!(
+                    error = ?err,
+                    "LoadIconW from exe resources failed; using stock icon"
+                );
+                LoadIconW(None, IDI_APPLICATION).context("LoadIconW(IDI_APPLICATION)")
+            }
+        }
+    }
+}
+
 pub fn add(hwnd: HWND) -> anyhow::Result<()> {
     unsafe {
-        let hicon = LoadIconW(None, IDI_APPLICATION).context("LoadIconW")?;
+        let hicon = load_app_tray_icon().context("tray icon")?;
         let mut nid = NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             hWnd: hwnd,
