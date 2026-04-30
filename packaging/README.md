@@ -29,7 +29,7 @@ From PowerShell:
 The script builds `target\release\copypasta.exe`, stages it with `packaging\msix\AppxManifest.xml` and `packaging\msix\Assets`, then writes:
 
 ```text
-target\msix\RipMultiPaste_1.0.0.0_x64.msix
+target\msix\RipMultiPaste_1.0.1.0_x64.msix
 ```
 
 The Store re-signs submitted MSIX packages. Use the script's `-PfxPath` option only when you need a locally signed package for sideload testing.
