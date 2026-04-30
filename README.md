@@ -9,7 +9,7 @@ Fast, local-only clipboard history, search, and multi-paste for Windows.
 
 ### Current features
 
-- **Very small UI**: `Ctrl + Win + V` opens a minimal searchable picker (Win32 popup + listbox).
+- **Very small UI**: `Ctrl + Alt + V` opens a minimal searchable picker (Win32 popup + listbox).
 - **Paste + recency**: selecting an item sets it as the Windows clipboard, sends `Ctrl + V` to the previously focused app, and **moves the item to the top**.
 - **Deduplication**: items are deduped by a BLAKE3 fingerprint (text is normalized; non-text uses canonical formats).
 - **Rich clipboard formats (best-effort)**: captures/restores multiple formats when they are backed by global memory (Unicode text, ANSI text, HTML, RTF, DIB/DIBV5 images, file drops).
@@ -18,7 +18,7 @@ Fast, local-only clipboard history, search, and multi-paste for Windows.
 
 ### Hotkeys
 
-- **Ctrl + Win + V**: open picker
+- **Ctrl + Alt + V**: open picker
 - **Win + Ctrl + Alt + C**: copy current selection into Windows clipboard, then capture it via clipboard updates
 - **Win + Ctrl + Alt + Q**: dev-only quit hotkey
 
@@ -27,7 +27,7 @@ Hotkeys are configurable in `hotkeys.json` under the per-user app config directo
 ```json
 {
   "open_picker": {
-    "modifiers": ["ctrl", "win"],
+    "modifiers": ["ctrl", "alt"],
     "key": "V"
   },
   "capture": {

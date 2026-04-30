@@ -152,7 +152,7 @@ pub struct HotkeyConfig {
 impl HotkeyConfig {
     pub fn default_config() -> Self {
         Self {
-            open_picker: HotkeySpec::new(&["ctrl", "win"], "V"),
+            open_picker: HotkeySpec::new(&["ctrl", "alt"], "V"),
             capture: HotkeySpec::new(&["win", "ctrl", "alt"], "C"),
             quit_dev: HotkeySpec::new(&["win", "ctrl", "alt"], "Q"),
         }
