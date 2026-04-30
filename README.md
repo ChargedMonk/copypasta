@@ -5,7 +5,7 @@
 
 Fast, local-only clipboard history, search, and multi-paste for Windows.
 
-[Get it from Microsoft Store]([https://www.example.com](https://apps.microsoft.com/detail/9P479B0MZTZ8))
+[Get it from Microsoft Store](https://apps.microsoft.com/detail/9P479B0MZTZ8)
 
 ### Current features
 
