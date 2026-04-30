@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$PackageVersion = "1.0.0.0"
+$PackageVersion = "1.0.1.0"
 $PackageName = "RipMultiPaste_$PackageVersion`_$Platform"
 $StageDir = Join-Path $RepoRoot "target\msix\stage"
 $OutputDir = Join-Path $RepoRoot "target\msix"
