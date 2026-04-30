@@ -366,7 +366,7 @@ mod tests {
     fn default_hotkey_labels() {
         let config = HotkeyConfig::default_config();
 
-        assert_eq!(config.open_picker.label(), "Ctrl+Win+V");
+        assert_eq!(config.open_picker.label(), "Ctrl+Alt+V");
         assert_eq!(config.capture.label(), "Win+Ctrl+Alt+C");
     }
 
